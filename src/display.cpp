@@ -13,7 +13,7 @@
 #define SCREEN_HEIGHT 64
 
 extern String currentPlantType;
-extern String pumpMode;
+extern String actuatorMode; // "manual" | "auto"
 extern bool lowMoistureAlert;
 extern unsigned long lastBlinkTime;
 extern bool blinkState;
@@ -61,7 +61,7 @@ void updateDisplay(float temp, float moisture, int threshold, const String& pump
 
     display.setTextSize(1);
     display.setCursor(88, 0);
-    display.print(pumpMode == "1" ? "Auto" : "Manual");
+    display.print(actuatorMode == "auto" ? "Auto" : "Manual");
 
     display.drawBitmap(0, 22, temp_icon, 16, 16, SSD1306_WHITE);
     display.setCursor(18, 26);

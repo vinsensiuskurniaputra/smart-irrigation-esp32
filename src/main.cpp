@@ -6,8 +6,8 @@
 
 // Global variables (bisa dipakai di modul lain via extern)
 String currentPlantType = "chili";
-String pumpMode = "0";
-String manualPumpStatus = "0";
+String actuatorMode = "manual";  // "manual" | "auto"
+String actuatorStatus = "off";    // desired state when manual
 bool lowMoistureAlert = false;
 unsigned long lastBlinkTime = 0;
 bool blinkState = false;
@@ -39,33 +39,45 @@ void loop() {
     moisturePercent = constrain(moisturePercent, 0, 100);
 
     float temperature = dht.readTemperature();
+    float humidity = dht.readHumidity();
     if (isnan(temperature)) temperature = 0.0;
+    if (isnan(humidity)) humidity = 0.0;
 
-    int threshold = getThresholdByPlantType(currentPlantType);
-    String pumpStatus = "0";
-
-    if (pumpMode == "1") {
-        if (moisturePercent < threshold) {
-            digitalWrite(RELAY_PIN, HIGH);
-            pumpStatus = "1";
-        } else {
-            digitalWrite(RELAY_PIN, LOW);
-            pumpStatus = "0";
-        }
-    } else {
-        pumpStatus = manualPumpStatus;
+    // Use dynamic rule thresholds (received via MQTT) instead of static plant type function.
+    extern int ruleMinMoisture;
+    extern int ruleMaxMoisture;
+    int threshold = ruleMinMoisture; // Use min as trigger threshold (pump turns on below this)
+    bool pumpOn = false;
+    if (actuatorMode == "auto") {
+        // Auto: turn on when below min threshold, turn off when above max threshold (hysteresis)
+        extern int ruleMinMoisture;
+        extern int ruleMaxMoisture;
+        static bool lastState = false;
+        if (moisturePercent < ruleMinMoisture) lastState = true;  // need water
+        else if (moisturePercent > ruleMaxMoisture) lastState = false; // soil sufficiently moist
+        pumpOn = lastState;
+    } else { // manual
+        pumpOn = (actuatorStatus == "on");
     }
+
+    digitalWrite(RELAY_PIN, pumpOn ? HIGH : LOW);
+    String pumpStatus = pumpOn ? "1" : "0";
 
     lowMoistureAlert = (moisturePercent < threshold);
 
     updateDisplay(temperature, moisturePercent, threshold, pumpStatus);
-    mqtt_publishData(temperature, moisturePercent, pumpStatus, threshold);
+    mqtt_publishSensors(temperature, moisturePercent, humidity);
+    mqtt_publishActualActuatorStatus(pumpStatus == "1");
 
-    Serial.printf("Plant:%s, Mode:%s, Moisture:%.1f%%, Temp:%.1fC, Pump:%s, Thr:%d%%\n",
+    // Example rule publish (static for now - could be dynamic/config-driven)
+    // Rule now subscribed; no longer publishing rule JSON here.
+
+    Serial.printf("Plant:%s, Mode:%s, Moisture:%.1f%%, Temp:%.1fC, Hum:%.1f%%, Pump:%s, Thr:%d%%\n",
                   currentPlantType.c_str(),
-                  (pumpMode == "1" ? "Auto" : "Manual"),
+                  (actuatorMode == "auto" ? "Auto" : "Manual"),
                   moisturePercent,
                   temperature,
+                  humidity,
                   (pumpStatus == "1" ? "ON" : "OFF"),
                   threshold);
 
