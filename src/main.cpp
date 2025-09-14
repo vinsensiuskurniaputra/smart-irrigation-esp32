@@ -1,22 +1,19 @@
 #include <Arduino.h>
 #include <DHT.h>
+#include "config.h"
 #include "display.h"
 #include "mqtt_handler.h"
 #include "utils.h"
 
 // Global variables (bisa dipakai di modul lain via extern)
 String currentPlantType = "chili";
-String actuatorMode = "manual";  // "manual" | "auto"
-String actuatorStatus = "off";    // desired state when manual
+String actuatorMode = "manual";  // "manual" | "auto" - controlled via MQTT
+String actuatorStatus = "off";    // "on" | "off" - controlled via MQTT subscription
 bool lowMoistureAlert = false;
 unsigned long lastBlinkTime = 0;
 bool blinkState = false;
 
 // DHT & sensor
-#define DHTPIN 22
-#define DHTTYPE DHT22
-#define SOIL_PIN 34
-#define RELAY_PIN 33
 DHT dht(DHTPIN, DHTTYPE);
 
 void setup() {
@@ -65,7 +62,7 @@ void loop() {
 
     lowMoistureAlert = (moisturePercent < threshold);
 
-    updateDisplay(temperature, moisturePercent, threshold, pumpStatus);
+    updateDisplay(30, 20, threshold, pumpStatus);
     mqtt_publishSensors(temperature, moisturePercent, humidity);
     mqtt_publishActualActuatorStatus(pumpStatus == "1");
 

@@ -1,4 +1,5 @@
 #include "mqtt_handler.h"
+#include "config.h"
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
@@ -6,9 +7,6 @@
 extern String currentPlantType;
 extern String actuatorMode;    // "manual" | "auto"
 extern String actuatorStatus;  // "on" | "off" (desired when manual)
-
-// NOTE: Relay pin also controlled in main.cpp; keep consistent or refactor to a common header.
-#define RELAY_PIN 5
 
 // New device/topic constants
 const char* DEVICE_CODE = "GH-001";
@@ -27,7 +25,7 @@ static String topicActuatorBase() { return topicDeviceBase() + "/actuator/" + AC
 
 const char* ssid = "CR HARYONO"; // TODO: move to config/secret store
 const char* password = "adiputwan03"; // TODO: move to config/secret store
-const char* mqtt_server = "192.168.1.8";
+const char* mqtt_server = "202.10.48.12";
 const int mqtt_port = 1883;
 
 WiFiClient espClient;
@@ -54,19 +52,35 @@ void callback(char* topic, byte* payload, unsigned int length) {
     }
 
     if (topicStr == actuatorStatusTopic) {
-        if (msg == "on" || msg == "off") {
-            actuatorStatus = msg;
-            if (actuatorMode == "manual") {
-                digitalWrite(RELAY_PIN, actuatorStatus == "on" ? HIGH : LOW);
+        // Parse JSON format: {"value":"on"} or {"value":"off"}
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, msg);
+        if (err) {
+            Serial.print("Status JSON parse error: ");
+            Serial.println(err.c_str());
+            return;
+        }
+        
+        if (doc.containsKey("value")) {
+            String status = String(doc["value"].as<const char*>());
+            if (status == "on" || status == "off") {
+                actuatorStatus = status;
+                Serial.printf("Actuator status updated to: %s\n", actuatorStatus.c_str());
+                if (actuatorMode == "manual") {
+                    digitalWrite(RELAY_PIN, actuatorStatus == "on" ? HIGH : LOW);
+                    Serial.printf("Relay set to: %s\n", actuatorStatus == "on" ? "HIGH" : "LOW");
+                }
+            } else {
+                Serial.println("Unknown status value in JSON");
             }
         } else {
-            Serial.println("Unknown status payload");
+            Serial.println("Missing 'value' field in status JSON");
         }
         return;
     }
 
     if (topicStr == ruleTopic) {
-        StaticJsonDocument<256> doc;
+        JsonDocument doc;
         DeserializationError err = deserializeJson(doc, msg);
         if (err) {
             Serial.print("Rule JSON parse error: ");
@@ -108,10 +122,16 @@ void mqtt_reconnect() {
             // Actuator & rule topics
             String modeTopic = topicActuatorBase() + "/mode";
             String statusTopic = topicActuatorBase() + "/status";
+            String ruleTopic = topicDeviceBase() + "/rule";
+            
             client.subscribe(modeTopic.c_str());
             client.subscribe(statusTopic.c_str());
-            String ruleTopic = topicDeviceBase() + "/rule";
             client.subscribe(ruleTopic.c_str());
+            
+            Serial.printf("Subscribed to topics:\n");
+            Serial.printf("  Mode: %s\n", modeTopic.c_str());
+            Serial.printf("  Status: %s\n", statusTopic.c_str());
+            Serial.printf("  Rule: %s\n", ruleTopic.c_str());
         } else {
             Serial.print("gagal, rc=");
             Serial.print(client.state());
@@ -128,15 +148,25 @@ void mqtt_publishSensors(float temperature, float moisture, float humidity) {
     if (!client.connected()) return;
     // sensor_id: soil moisture=1, temperature=2, humidity=3
     String base = topicDeviceBase() + "/sensor/";
-    client.publish(String(base + "1").c_str(), String(moisture, 1).c_str(), true);
-    client.publish(String(base + "2").c_str(), String(temperature, 1).c_str(), true);
-    client.publish(String(base + "3").c_str(), String(humidity, 1).c_str(), true);
+
+    // Bungkus ke JSON
+    String moistureJson   = "{\"value\":\"" + String(moisture, 1) + "\"}";
+    String temperatureJson = "{\"value\":\"" + String(temperature, 1) + "\"}";
+    String humidityJson    = "{\"value\":\"" + String(humidity, 1) + "\"}";
+
+    client.publish(String(base + "1").c_str(), moistureJson.c_str(), true);
+    client.publish(String(base + "2").c_str(), temperatureJson.c_str(), true);
+    client.publish(String(base + "3").c_str(), humidityJson.c_str(), true);
 }
 
 void mqtt_publishActualActuatorStatus(bool isOn) {
     if (!client.connected()) return;
     String topic = topicActuatorBase() + "/actual-status";
-    client.publish(topic.c_str(), (isOn ? "on" : "off"), true);
+
+    // Bungkus dalam JSON
+    String payload = "{\"value\":\"" + String(isOn ? "on" : "off") + "\"}";
+
+    client.publish(topic.c_str(), payload.c_str(), true);
 }
 
 
