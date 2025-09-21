@@ -62,7 +62,7 @@ void loop() {
 
     lowMoistureAlert = (moisturePercent < threshold);
 
-    updateDisplay(30, 20, threshold, pumpStatus);
+    updateDisplay(temperature, moisturePercent, threshold, pumpStatus);
     mqtt_publishSensors(temperature, moisturePercent, humidity);
     mqtt_publishActualActuatorStatus(pumpStatus == "1");
 

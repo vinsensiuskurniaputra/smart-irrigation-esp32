@@ -47,7 +47,31 @@ void callback(char* topic, byte* payload, unsigned int length) {
     String ruleTopic = topicDeviceBase() + "/rule";
 
     if (topicStr == actuatorModeTopic) {
-        if (msg == "manual" || msg == "auto") actuatorMode = msg; else Serial.println("Unknown mode payload");
+        // Accept either plain text payloads: "manual" | "auto"
+        if (msg == "manual" || msg == "auto") {
+            actuatorMode = msg;
+            Serial.printf("Actuator mode updated to: %s\n", actuatorMode.c_str());
+            return;
+        }
+
+        // Or accept JSON payload: {"value":"manual"} or {"value":"auto"}
+        {
+            JsonDocument doc;
+            DeserializationError err = deserializeJson(doc, msg);
+            if (!err && doc.containsKey("value")) {
+                String mode = String(doc["value"].as<const char *>());
+                if (mode == "manual" || mode == "auto") {
+                    actuatorMode = mode;
+                    Serial.printf("Actuator mode updated to: %s (from JSON)\n", actuatorMode.c_str());
+                    return;
+                } else {
+                    Serial.println("Unknown mode value in JSON");
+                    return;
+                }
+            }
+        }
+
+        Serial.println("Unknown mode payload");
         return;
     }
 
