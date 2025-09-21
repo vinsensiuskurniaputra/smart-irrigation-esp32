@@ -45,14 +45,51 @@ void loop() {
     extern int ruleMaxMoisture;
     int threshold = ruleMinMoisture; // Use min as trigger threshold (pump turns on below this)
     bool pumpOn = false;
+
+    // Auto mode: non-blocking state machine.
+    // Behavior: when moisture < ruleMinMoisture start a cycle: run pump for 10s, then turn off and wait 60s.
+    // If moisture goes above ruleMaxMoisture the cycle stops and pump stays off until re-triggered.
+    const unsigned long PUMP_RUN_MS = 10UL * 1000UL;      // 10 seconds
+    const unsigned long PUMP_COOLDOWN_MS = 60UL * 1000UL; // 60 seconds
+
     if (actuatorMode == "auto") {
-        // Auto: turn on when below min threshold, turn off when above max threshold (hysteresis)
-        extern int ruleMinMoisture;
-        extern int ruleMaxMoisture;
-        static bool lastState = false;
-        if (moisturePercent < ruleMinMoisture) lastState = true;  // need water
-        else if (moisturePercent > ruleMaxMoisture) lastState = false; // soil sufficiently moist
-        pumpOn = lastState;
+        static uint8_t pumpState = 0; // 0=idle,1=running,2=cooldown
+        static unsigned long stateStart = 0;
+        unsigned long now = millis();
+
+        // If soil sufficiently moist, reset to idle and stop the pump
+        if (moisturePercent > ruleMaxMoisture) {
+            pumpState = 0;
+        }
+
+        if (moisturePercent < ruleMinMoisture) {
+            if (pumpState == 0) {
+                // Start running immediately when first detected below threshold
+                pumpState = 1;
+                stateStart = now;
+            } else if (pumpState == 1) {
+                // Running: check run timeout
+                if (now - stateStart >= PUMP_RUN_MS) {
+                    pumpState = 2; // enter cooldown
+                    stateStart = now;
+                }
+            } else if (pumpState == 2) {
+                // Cooldown: wait then re-evaluate
+                if (now - stateStart >= PUMP_COOLDOWN_MS) {
+                    if (moisturePercent < ruleMinMoisture) {
+                        pumpState = 1; // run again
+                        stateStart = now;
+                    } else {
+                        pumpState = 0; // go idle
+                    }
+                }
+            }
+        } else {
+            // Not below min threshold and not above max hysteresis: ensure pump is off
+            if (pumpState != 0) pumpState = 0;
+        }
+
+        pumpOn = (pumpState == 1);
     } else { // manual
         pumpOn = (actuatorStatus == "on");
     }
