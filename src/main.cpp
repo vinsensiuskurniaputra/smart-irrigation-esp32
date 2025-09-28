@@ -13,6 +13,15 @@ bool lowMoistureAlert = false;
 unsigned long lastBlinkTime = 0;
 bool blinkState = false;
 
+// DHT sensor state management
+bool dhtReadingEnabled = true;
+float lastTemperature = 0.0;
+float lastHumidity = 0.0;
+
+// MQTT sensor publishing timing
+unsigned long lastMqttPublishTime = 0;
+const unsigned long MQTT_PUBLISH_INTERVAL = 5000; // 5 seconds in milliseconds
+
 // DHT & sensor
 DHT dht(DHTPIN, DHTTYPE);
 
@@ -35,10 +44,23 @@ void loop() {
     float moisturePercent = map(sensorValue, 0, 4095, 100, 0);
     moisturePercent = constrain(moisturePercent, 0, 100);
 
-    float temperature = dht.readTemperature();
-    float humidity = dht.readHumidity();
-    if (isnan(temperature)) temperature = 0.0;
-    if (isnan(humidity)) humidity = 0.0;
+    float temperature, humidity;
+    
+    // Only read DHT sensor when pump is off or when dhtReadingEnabled is true
+    if (dhtReadingEnabled) {
+        temperature = dht.readTemperature();
+        humidity = dht.readHumidity();
+        if (isnan(temperature)) temperature = 0.0;
+        if (isnan(humidity)) humidity = 0.0;
+        
+        // Store the latest valid readings
+        if (temperature > 0.0) lastTemperature = temperature;
+        if (humidity > 0.0) lastHumidity = humidity;
+    } else {
+        // Use stored values when DHT reading is disabled
+        temperature = lastTemperature;
+        humidity = lastHumidity;
+    }
 
     // Use dynamic rule thresholds (received via MQTT) instead of static plant type function.
     extern int ruleMinMoisture;
@@ -97,11 +119,27 @@ void loop() {
     digitalWrite(RELAY_PIN, pumpOn ? HIGH : LOW);
     String pumpStatus = pumpOn ? "1" : "0";
 
+    // Control DHT reading based on pump status
+    // Disable DHT reading when pump is on to prevent ESP restart
+    dhtReadingEnabled = !pumpOn;
+
     lowMoistureAlert = (moisturePercent < threshold);
 
-    updateDisplay(temperature, moisturePercent, threshold, pumpStatus);
-    mqtt_publishSensors(temperature, moisturePercent, humidity);
-    mqtt_publishActualActuatorStatus(pumpStatus == "1");
+    // Use scene-based display instead of the old updateDisplay
+    updateDisplayScenes(temperature, moisturePercent, threshold, humidity);
+    
+    // Publish MQTT sensor data only every 5 seconds
+    unsigned long currentTime = millis();
+    if (currentTime - lastMqttPublishTime >= MQTT_PUBLISH_INTERVAL) {
+        mqtt_publishSensors(temperature, moisturePercent, humidity);
+        mqtt_publishActualActuatorStatus(pumpStatus == "1");
+        lastMqttPublishTime = currentTime;
+    }
+    
+    // Debug info for DHT reading state
+    if (!dhtReadingEnabled) {
+        Serial.println("DHT reading paused (pump active) - using stored values");
+    }
 
     // Example rule publish (static for now - could be dynamic/config-driven)
     // Rule now subscribed; no longer publishing rule JSON here.

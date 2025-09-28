@@ -5,5 +5,7 @@
 
 void initDisplay();
 void updateDisplay(float temp, float moisture, int threshold, const String& pumpStatusStr);
+void updateDisplayScenes(float temp, float moisture, int threshold, float humidity);
+void resetSceneTiming();
 
 #endif
